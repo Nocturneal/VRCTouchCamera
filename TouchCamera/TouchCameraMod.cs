@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using System.ComponentModel;
 using CameraButton = MonoBehaviourPublicObGaCaTMImReImRaReSpUnique;
 
-[assembly: MelonInfo(typeof(TouchCameraMod), "TouchCamera", "2.0.2", "Eric van Fandenfart")]
+[assembly: MelonInfo(typeof(TouchCameraMod), "TouchCamera", "2.0.2a", "Eric van Fandenfart, Nocturneal")]
 [assembly: MelonGame]
 
 namespace TouchCamera
@@ -30,17 +30,27 @@ namespace TouchCamera
     public delegate void CameraReady();
     public class TouchCameraMod : MelonMod
     {
+        public static TouchCameraMod instance;
+        public TouchCameraMod() {
+            instance = this;
+        }
+
         //API Event for registering new Buttonds
         public static event CameraReady CameraReadyEvent;
         private MelonPreferences_Entry<Hands> selectedhand;
+        private MelonPreferences_Entry<bool> shouldEnable;
+        private MelonPreferences_Entry<bool> shouldUseCustomShader;
         public override void OnApplicationStart()
         {
             var category = MelonPreferences.CreateCategory("Touch Camera");
+            shouldEnable = category.CreateEntry("modEnable", true, display_name: "Enable", description: "Enable or disable touch interaction.");
+            shouldUseCustomShader = category.CreateEntry("shaderEnable", true, display_name: "Shader", description: "Enable or disable custom shaders (requires restart!)");
             selectedhand = category.CreateEntry("Hand", Hands.RightHand, display_name: "Hand", description: "Used hand for interactions");
-
 
             MelonCoroutines.Start(WaitForCamera());
         }
+
+        internal static bool isModEnabled => instance?.shouldEnable.Value ?? true;
 
         private IEnumerator WaitForCamera()
         {
@@ -65,60 +75,59 @@ namespace TouchCamera
             }
             LoggerInstance.Msg("Registered TouchButton");
 
-            LoggerInstance.Msg("Disabling Overrender");
+            if (shouldUseCustomShader.Value) {
+                LoggerInstance.Msg("Disabling Overrender");
 
-            SetLayerRecursively(cameraobj.Find("ViewFinder/PhotoControls").gameObject, 3);
-            SetLayerRecursively(cameraobj.Find("ViewFinder/UserCamera_New").gameObject, 3);
-            AssetBundle bundle;
+                SetLayerRecursively(cameraobj.Find("ViewFinder/PhotoControls").gameObject, 3);
+                SetLayerRecursively(cameraobj.Find("ViewFinder/UserCamera_New").gameObject, 3);
+                AssetBundle bundle;
 
-            LoggerInstance.Msg("Loading replacment shaders from assetbundle");
-            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("TouchCamera.shaderreplacment"))
-            using (var tempStream = new MemoryStream((int)stream.Length))
-            {
-                stream.CopyTo(tempStream);
-                bundle = AssetBundle.LoadFromMemory(tempStream.ToArray(), 0);
+                LoggerInstance.Msg("Loading replacment shaders from assetbundle");
+                using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("TouchCamera.shaderreplacment"))
+                using (var tempStream = new MemoryStream((int)stream.Length)) {
+                    stream.CopyTo(tempStream);
+                    bundle = AssetBundle.LoadFromMemory(tempStream.ToArray(), 0);
+                }
+
+                uishader = bundle.LoadAsset<Shader>("Assets/UIReplacement.shader");
+                uishaderTMPRO = bundle.LoadAsset<Shader>("Assets/TextMesh Pro/Shaders/TMP_SDF-Mobile-Replacment.shader");
+
+                LoggerInstance.Msg("Loading shaders");
+                LoggerInstance.Msg("Applying shaders");
+
+
+
+                var rightArrow = cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/RightArrow");
+                var leftArrow = cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/LeftArrow");
+                //rightArrow.GetComponent<CameraUiAnimator>().
+                rightArrow.GetComponent<CameraUiAnimator>().enabled = false;
+                leftArrow.GetComponent<CameraUiAnimator>().enabled = false;
+
+                rightArrow.localScale = new Vector3(0.5f, 1, 1);
+                leftArrow.localScale = new Vector3(0.5f, 1, 1);
+
+                MelonCoroutines.Start(ApplyArrowTransform(leftArrow, rightArrow));
+
+
+
+                foreach (var item in cameraobj.Find("ViewFinder/PhotoControls").GetComponentsInChildren<CanvasRenderer>(true)) {
+                    ReplaceShader(item);
+                    item.gameObject.AddComponent<EnableDisableListener>().OnEnableEvent += obj => MelonCoroutines.Start(UpdateShader(obj));
+                }
+
+                while (cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/SelectedGroupHighlightArrow")?.GetComponent<CanvasRenderer>()?.GetMaterial()?.shader == null)
+                    yield return null;
+
+                //do it a second time to make sure all sub components also got it
+                foreach (var item in cameraobj.Find("ViewFinder/PhotoControls").GetComponentsInChildren<CanvasRenderer>(true).Where(x => x.GetComponent<EnableDisableListener>() == null)) {
+                    ReplaceShader(item);
+                    item.gameObject.AddComponent<EnableDisableListener>().OnEnableEvent += obj => MelonCoroutines.Start(UpdateShader(obj));
+                }
+
+
+
+                LoggerInstance.Msg("Disabled Overrender");
             }
-
-            uishader = bundle.LoadAsset<Shader>("Assets/UIReplacement.shader");
-            uishaderTMPRO = bundle.LoadAsset<Shader>("Assets/TextMesh Pro/Shaders/TMP_SDF-Mobile-Replacment.shader");
-
-            LoggerInstance.Msg("Loading shaders");
-            LoggerInstance.Msg("Applying shaders");
-
-
-
-            var rightArrow = cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/RightArrow");
-            var leftArrow = cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/LeftArrow");
-            //rightArrow.GetComponent<CameraUiAnimator>().
-            rightArrow.GetComponent<CameraUiAnimator>().enabled = false;
-            leftArrow.GetComponent<CameraUiAnimator>().enabled = false;
-
-            rightArrow.localScale = new Vector3(0.5f, 1, 1);
-            leftArrow.localScale = new Vector3(0.5f, 1, 1);
-
-            MelonCoroutines.Start(ApplyArrowTransform(leftArrow, rightArrow));
-
-
-
-            foreach (var item in cameraobj.Find("ViewFinder/PhotoControls").GetComponentsInChildren<CanvasRenderer>(true))
-            {
-                ReplaceShader(item);
-                item.gameObject.AddComponent<EnableDisableListener>().OnEnableEvent += obj => MelonCoroutines.Start(UpdateShader(obj));
-            }
-
-            while (cameraobj.Find("ViewFinder/PhotoControls/Primary /ControlGroup_Main/SelectedGroupHighlightArrow")?.GetComponent<CanvasRenderer>()?.GetMaterial()?.shader == null)
-                yield return null;
-
-            //do it a second time to make sure all sub components also got it
-            foreach (var item in cameraobj.Find("ViewFinder/PhotoControls").GetComponentsInChildren<CanvasRenderer>(true).Where(x => x.GetComponent<EnableDisableListener>() == null))
-            {
-                ReplaceShader(item);
-                item.gameObject.AddComponent<EnableDisableListener>().OnEnableEvent += obj => MelonCoroutines.Start(UpdateShader(obj));
-            }
-
-
-
-            LoggerInstance.Msg("Disabled Overrender");
         }
 
         private IEnumerator ApplyArrowTransform(Transform leftArrow, Transform rightArrow)

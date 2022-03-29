@@ -75,6 +75,9 @@ namespace TouchCamera
             if (!IsVisible())
                 return;
 
+            if (!TouchCameraMod.isModEnabled)
+                return;
+
             //Each corner provides its world space value. The returned array of 4 vertices is clockwise.
             //It starts bottom left and rotates to top left, then top right, and finally bottom right.
             //Note that bottom left, for example, is an (x, y, z) vector with x being left and y being bottom.
